@@ -1,7 +1,7 @@
 {
   "name": "Deep Search",
   "shortName": "deepsearch",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Barak Shakel",
   "description": "Advanced global search for Local IPs, Public IPs, MAC Addresses, and Logged-in Users.",
   "hasAdminPanel": false,
