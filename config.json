@@ -7,5 +7,12 @@
   "hasAdminPanel": false,
   "hasServer": true,
   "hasWebUI": true,
+  "homepage": "https://github.com/BarakShakel/MeshCentral-DeepSearch",
+  "configUrl": "https://raw.githubusercontent.com/BarakShakel/MeshCentral-DeepSearch/main/config.json",
+  "downloadUrl": "https://github.com/BarakShakel/MeshCentral-DeepSearch/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BarakShakel/MeshCentral-DeepSearch.git"
+  },
   "meshCentralCompat": ">=1.0.0"
 }
