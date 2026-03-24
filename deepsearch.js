@@ -90,15 +90,11 @@ module.exports.deepsearch = function (parent) {
         try {
             var sender = (typeof meshserver !== 'undefined') ? meshserver : ((typeof server !== 'undefined') ? server : null);
             if (sender) {
-                // Ensure we pass the sessionId from the client if possible
-                var sessId = (typeof sender.sessionId !== 'undefined') ? sender.sessionId : null;
-                
                 sender.send({ 
                     action: 'plugin', 
                     plugin: 'deepsearch', 
                     pluginaction: 'doSearch', 
-                    query: query,
-                    clientSessionId: sessId
+                    query: query
                 });
             } else {
                 throw new Error("WebSocket object not found.");
@@ -112,7 +108,7 @@ module.exports.deepsearch = function (parent) {
         var resultsDiv = document.getElementById('deepSearchResults');
         if (!resultsDiv) return;
 
-        // If the server encountered an error, display it here
+        // Display server-side errors if they occurred
         if (msg.error) {
             resultsDiv.innerHTML = '<div style="color:#d9534f; text-align:center; margin-top:100px; font-weight:bold;">Error: ' + pluginHandler.deepsearch.esc(msg.errorMessage) + '</div>';
             return;
@@ -156,135 +152,108 @@ module.exports.deepsearch = function (parent) {
     obj.serveraction = function(command, myparent, grandparent) {
         if (command.plugin !== 'deepsearch') return;
 
-        // Safely extract the session ID from the incoming websocket connection
-        var sessionid = command.clientSessionId;
-        if (!sessionid) {
-            try { sessionid = myparent.sessionId || myparent.ws.sessionId || myparent.id; } catch (e) {}
-        }
-        
         if (command.pluginaction === 'doSearch') {
             var query = (command.query || '').toLowerCase().trim();
-            if (!query) return;
+            
+            // Helper function to reply directly to the user who made the request
+            var replyToClient = function(dataArray, isError, errorMsg) {
+                try {
+                    if (myparent && typeof myparent.send === 'function') {
+                        myparent.send(JSON.stringify({
+                            action: 'plugin',
+                            plugin: 'deepsearch',
+                            method: 'loadSearchResults',
+                            data: dataArray || [],
+                            error: !!isError,
+                            errorMessage: errorMsg || ''
+                        }));
+                    }
+                } catch (e) {
+                    console.log('Deep Search reply error:', e);
+                }
+            };
+
+            if (!query) {
+                replyToClient([], false, "");
+                return;
+            }
 
             try {
-                // Correct MeshCentral DB function is GetAllType('node', callback)
-                if (typeof obj.meshServer.db.GetAllType === 'function') {
+                // Query the entire Node database
+                if (obj.meshServer && obj.meshServer.db && typeof obj.meshServer.db.GetAllType === 'function') {
                     obj.meshServer.db.GetAllType('node', function (err, allNodes) {
-                        processNodes(err, allNodes, sessionid, myparent, query);
-                    });
-                } else if (typeof obj.meshServer.db.GetAllTypeNodes === 'function') {
-                    // Fallback just in case some forks use this
-                    obj.meshServer.db.GetAllTypeNodes('node', function (err, allNodes) {
-                        processNodes(err, allNodes, sessionid, myparent, query);
+                        
+                        if (err || !allNodes) {
+                            replyToClient([], true, "Database read failed.");
+                            return;
+                        }
+
+                        var results = [];
+                        // Check if the user is a full site administrator
+                        var isSiteAdmin = (myparent.user && myparent.user.siteadmin == 0xFFFFFFFF);
+
+                        for (var i = 0; i < allNodes.length; i++) {
+                            var node = allNodes[i];
+                            
+                            // Security Check: Only search nodes the current user has access to
+                            if (!isSiteAdmin) {
+                                if (!myparent.user || !myparent.user.links || !myparent.user.links[node.meshid]) continue;
+                            }
+
+                            var match = false;
+                            var matchReason = '';
+
+                            // 1. Search by Device Name
+                            if (node.name && node.name.toLowerCase().indexOf(query) !== -1) {
+                                match = true; matchReason = 'Device Name';
+                            }
+                            
+                            // 2. Search by Logged-in Users
+                            if (!match && node.users) {
+                                for (var u = 0; u < node.users.length; u++) {
+                                    if (node.users[u] && node.users[u].toLowerCase().indexOf(query) !== -1) {
+                                        match = true; matchReason = 'Logged-in User (' + node.users[u] + ')';
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 3. Search by Connection Public IP
+                            if (!match && node.conn && node.conn.ip) {
+                                if (node.conn.ip.toLowerCase().indexOf(query) !== -1) {
+                                    match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
+                                }
+                            }
+
+                            // 4. Search by Local IPs / MAC Addresses (Deep Search in netinfo object)
+                            if (!match && node.netinfo) {
+                                var netStr = JSON.stringify(node.netinfo).toLowerCase();
+                                if (netStr.indexOf(query) !== -1) {
+                                    match = true; matchReason = 'Network Interface (IP / MAC)';
+                                }
+                            }
+
+                            if (match) {
+                                results.push({
+                                    _id: node._id,
+                                    name: node.name,
+                                    reason: matchReason
+                                });
+                            }
+                        }
+
+                        // Send results back to the exact user
+                        replyToClient(results, false, "");
                     });
                 } else {
-                    sendError(sessionid, "Database read function not found. Plugin needs an update for this MeshCentral version.");
+                    replyToClient([], true, "Database function GetAllType not found. Plugin may need an update for this MeshCentral version.");
                 }
             } catch (ex) {
-                console.log('Deep Search Plugin DB Error:', ex);
-                sendError(sessionid, "Server exception: " + ex.message);
+                console.log('Deep Search Plugin Error:', ex);
+                replyToClient([], true, "Server exception: " + ex.message);
             }
         }
     };
-
-    function processNodes(err, allNodes, sessionid, myparent, query) {
-        var results = [];
-        
-        if (err || !allNodes) {
-            sendError(sessionid, "Failed to read devices from database.");
-            return;
-        }
-
-        // Check if the user is a full site administrator (0xFFFFFFFF)
-        var isSiteAdmin = false;
-        if (myparent && myparent.user && myparent.user.siteadmin == 0xFFFFFFFF) {
-            isSiteAdmin = true;
-        }
-
-        for (var i = 0; i < allNodes.length; i++) {
-            var node = allNodes[i];
-            
-            // Security Check: Only search nodes the current user has access to
-            if (!isSiteAdmin) {
-                if (!myparent.user || !myparent.user.links || !myparent.user.links[node.meshid]) continue;
-            }
-
-            var match = false;
-            var matchReason = '';
-
-            // 1. Search by Device Name
-            if (node.name && node.name.toLowerCase().indexOf(query) !== -1) {
-                match = true; matchReason = 'Device Name';
-            }
-            
-            // 2. Search by Logged-in Users
-            if (!match && node.users) {
-                for (var u = 0; u < node.users.length; u++) {
-                    if (node.users[u] && node.users[u].toLowerCase().indexOf(query) !== -1) {
-                        match = true; matchReason = 'Logged-in User (' + node.users[u] + ')';
-                        break;
-                    }
-                }
-            }
-
-            // 3. Search by Connection Public IP
-            if (!match && node.conn && node.conn.ip) {
-                if (node.conn.ip.toLowerCase().indexOf(query) !== -1) {
-                    match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
-                }
-            }
-
-            // 4. Search by Local IPs / MAC Addresses (Deep Search in netinfo object)
-            if (!match && node.netinfo) {
-                var netStr = JSON.stringify(node.netinfo).toLowerCase();
-                if (netStr.indexOf(query) !== -1) {
-                    match = true; matchReason = 'Local Network Interface (IP/MAC)';
-                }
-            }
-
-            if (match) {
-                results.push({
-                    _id: node._id,
-                    name: node.name,
-                    reason: matchReason
-                });
-            }
-        }
-
-        // Return search results back to the user's browser
-        sendResults(sessionid, results);
-    }
-
-    function sendResults(targetSessionid, dataArray) {
-        if (targetSessionid && obj.meshServer.webserver.wssessions2 && obj.meshServer.webserver.wssessions2[targetSessionid]) {
-            try {
-                obj.meshServer.webserver.wssessions2[targetSessionid].send(JSON.stringify({
-                    action: 'plugin',
-                    plugin: 'deepsearch',
-                    method: 'loadSearchResults',
-                    data: dataArray,
-                    error: false
-                }));
-            } catch (e) {
-                console.log('Deep Search routing error:', e);
-            }
-        }
-    }
-
-    function sendError(targetSessionid, errorMsg) {
-        if (targetSessionid && obj.meshServer.webserver.wssessions2 && obj.meshServer.webserver.wssessions2[targetSessionid]) {
-            try {
-                obj.meshServer.webserver.wssessions2[targetSessionid].send(JSON.stringify({
-                    action: 'plugin',
-                    plugin: 'deepsearch',
-                    method: 'loadSearchResults',
-                    data: [],
-                    error: true,
-                    errorMessage: errorMsg
-                }));
-            } catch (e) {}
-        }
-    }
 
     return obj;
 };
