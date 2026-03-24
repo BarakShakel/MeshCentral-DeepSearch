@@ -1,0 +1,11 @@
+{
+  "name": "Deep Search",
+  "shortName": "deepsearch",
+  "version": "1.0.0",
+  "author": "Barak Shakel",
+  "description": "Advanced global search for Local IPs, Public IPs, MAC Addresses, and Logged-in Users.",
+  "hasAdminPanel": false,
+  "hasServer": true,
+  "hasWebUI": true,
+  "meshCentralCompat": ">=1.0.0"
+}
