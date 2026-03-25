@@ -169,15 +169,14 @@ module.exports.deepsearch = function (parent) {
             var itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
             var itemBorder = isDark ? '#444' : '#eee';
 
-            // Fixed Button Type and Navigation Path:
-            // type="button" prevents accidental form submission (page reload).
-            // '?id=' (relative path) ensures compatibility with proxy setups and sub-directory installations.
+            // FIX URL NAVIGATION: Changed to Hash Routing ('#?id=') to utilize MeshCentral's Single Page Application architecture.
+            // This prevents hard reloads and navigates instantly. No URL encoding needed for MeshCentral IDs.
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
                     '<div style="font-size:12px; opacity:0.8; margin-top:4px;">Match: ' + pluginHandler.deepsearch.esc(device.reason) + '</div>' +
                     '</div>' +
-                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.href=\'?id=' + device._id + '\';" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
+                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.href=\'#?id=' + device._id + '\';" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
                     '</div>';
         }
 
@@ -200,7 +199,7 @@ module.exports.deepsearch = function (parent) {
         if (command.pluginaction === 'doSearch') {
             var rawQuery = (command.query || '').trim().toLowerCase();
             
-            // Normalize the query by removing colons, dashes, and dots (helps with MAC addresses and IPs)
+            // Normalize the query by removing colons, dashes, and dots (crucial for MAC addresses)
             var normalizedQuery = rawQuery.replace(/[:\-.]/g, '');
             
             var sessionid = null;
@@ -284,20 +283,15 @@ module.exports.deepsearch = function (parent) {
                                 }
                             }
 
-                            // 5. Search by ALL Network Interfaces (Local IPs, Public IPs, MACs)
+                            // 5. Deep Search across the ENTIRE node object for MACs and hidden IPs
+                            // Stringifying the whole node ensures no MAC address is missed regardless of where MeshCentral stores it.
                             if (!match) {
-                                var networkString = '';
-                                if (node.interfaces) networkString += JSON.stringify(node.interfaces).toLowerCase();
-                                if (node.netinfo) networkString += JSON.stringify(node.netinfo).toLowerCase();
-                                if (node.conn) networkString += JSON.stringify(node.conn).toLowerCase();
-                                if (node.ip) networkString += String(node.ip).toLowerCase();
+                                var fullNodeString = JSON.stringify(node).toLowerCase();
+                                var normalizedNodeString = fullNodeString.replace(/[:\-.]/g, '');
 
-                                // Normalize the network string to strip special chars for reliable MAC searching
-                                var normalizedNetworkString = networkString.replace(/[:\-.]/g, '');
-
-                                // Check raw query OR normalized query (if the query is at least 4 chars long to prevent false positives)
-                                if (networkString.indexOf(rawQuery) !== -1 || (normalizedQuery.length >= 4 && normalizedNetworkString.indexOf(normalizedQuery) !== -1)) {
-                                    match = true; matchReason = 'Network Interface (Local IP / MAC)';
+                                // Check raw query OR normalized query (require at least 4 chars to prevent false positives)
+                                if (fullNodeString.indexOf(rawQuery) !== -1 || (normalizedQuery.length >= 4 && normalizedNodeString.indexOf(normalizedQuery) !== -1)) {
+                                    match = true; matchReason = 'Deep Hardware/Network Match (IP / MAC)';
                                 }
                             }
 
