@@ -47,6 +47,7 @@ module.exports.deepsearch = function (parent) {
 
         var btn = document.createElement('button');
         btn.id = 'btn-deep-search';
+        btn.type = 'button';
         btn.innerHTML = '&#128269; Deep Search';
         // Styling matches MeshCentral's native look, supporting Light/Dark mode seamlessly
         btn.style.cssText = 'margin-left: 10px; padding: 4px 12px; border-radius: 3px; background-color: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; font-size: 13px; height: 28px; vertical-align: middle;';
@@ -65,8 +66,7 @@ module.exports.deepsearch = function (parent) {
     obj.showDeepSearchDialog = function () {
         if (document.getElementById('deepSearchOverlay')) return;
 
-        // FIX FOCUS STEALING: Temporarily rename the native search input ID 
-        // so MeshCentral's global keydown interceptor cannot find it and steal focus.
+        // Prevent native UI from stealing focus by temporarily disabling it
         var nativeSearch = document.getElementById('SearchInput');
         if (nativeSearch) {
             nativeSearch.id = 'SearchInput_TempDisabled';
@@ -91,10 +91,10 @@ module.exports.deepsearch = function (parent) {
                      '<span style="cursor:pointer; font-size:24px; font-weight:bold; line-height:1;" onclick="pluginHandler.deepsearch.closeDeepSearch()">&times;</span>' +
                      '</div>';
 
-        // Added stopPropagation to key events to prevent MeshCentral from intercepting typing
+        // Added stopPropagation to prevent MeshCentral from intercepting typing
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
                         '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
-                        '<button onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
+                        '<button type="button" onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
                         '</div>';
 
         var resultsArea = '<div id="deepSearchResults" style="flex:1; overflow-y:auto; border:1px solid ' + borderColor + '; border-radius:4px; padding:10px; background:rgba(128,128,128,0.05); min-height:250px;">' +
@@ -116,7 +116,7 @@ module.exports.deepsearch = function (parent) {
         var overlay = document.getElementById('deepSearchOverlay');
         if (overlay) document.body.removeChild(overlay);
 
-        // FIX FOCUS STEALING: Restore native search input ID and enable it
+        // Restore native search input ID and enable it
         var nativeSearch = document.getElementById('SearchInput_TempDisabled');
         if (nativeSearch) {
             nativeSearch.id = 'SearchInput';
@@ -169,13 +169,15 @@ module.exports.deepsearch = function (parent) {
             var itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
             var itemBorder = isDark ? '#444' : '#eee';
 
-            // FIX URL ENCODING: encodeURIComponent ensures the complex device._id does not break the URL
+            // Fixed Button Type and Navigation Path:
+            // type="button" prevents accidental form submission (page reload).
+            // '?id=' (relative path) ensures compatibility with proxy setups and sub-directory installations.
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
                     '<div style="font-size:12px; opacity:0.8; margin-top:4px;">Match: ' + pluginHandler.deepsearch.esc(device.reason) + '</div>' +
                     '</div>' +
-                    '<button onclick="window.location.href=\'/?id=' + encodeURIComponent(device._id) + '\'; pluginHandler.deepsearch.closeDeepSearch();" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
+                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.href=\'?id=' + device._id + '\';" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
                     '</div>';
         }
 
@@ -196,7 +198,10 @@ module.exports.deepsearch = function (parent) {
         if (command.plugin !== 'deepsearch') return;
 
         if (command.pluginaction === 'doSearch') {
-            var query = (command.query || '').toLowerCase().trim();
+            var rawQuery = (command.query || '').trim().toLowerCase();
+            
+            // Normalize the query by removing colons, dashes, and dots (helps with MAC addresses and IPs)
+            var normalizedQuery = rawQuery.replace(/[:\-.]/g, '');
             
             var sessionid = null;
             try { sessionid = myparent.ws.sessionId; } catch (e) {}
@@ -225,7 +230,7 @@ module.exports.deepsearch = function (parent) {
                 } catch (e) {}
             };
 
-            if (!query) {
+            if (!rawQuery) {
                 replyToClient([], false, "");
                 return;
             }
@@ -253,26 +258,33 @@ module.exports.deepsearch = function (parent) {
                             var matchReason = '';
 
                             // 1. Search by Device Name
-                            if (node.name && node.name.toLowerCase().indexOf(query) !== -1) {
+                            if (node.name && node.name.toLowerCase().indexOf(rawQuery) !== -1) {
                                 match = true; matchReason = 'Device Name';
                             }
 
                             // 2. Search by Device Description
-                            if (!match && node.desc && node.desc.toLowerCase().indexOf(query) !== -1) {
+                            if (!match && node.desc && node.desc.toLowerCase().indexOf(rawQuery) !== -1) {
                                 match = true; matchReason = 'Description';
                             }
                             
                             // 3. Search by Logged-in Users
                             if (!match && node.users) {
                                 for (var u = 0; u < node.users.length; u++) {
-                                    if (node.users[u] && node.users[u].toLowerCase().indexOf(query) !== -1) {
+                                    if (node.users[u] && node.users[u].toLowerCase().indexOf(rawQuery) !== -1) {
                                         match = true; matchReason = 'Logged-in User (' + node.users[u] + ')';
                                         break;
                                     }
                                 }
                             }
 
-                            // 4. Search by ALL Network Interfaces (Local IPs, Public IPs, MACs)
+                            // 4. Search by Connection Public IP
+                            if (!match && node.conn && node.conn.ip) {
+                                if (node.conn.ip.toLowerCase().indexOf(rawQuery) !== -1) {
+                                    match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
+                                }
+                            }
+
+                            // 5. Search by ALL Network Interfaces (Local IPs, Public IPs, MACs)
                             if (!match) {
                                 var networkString = '';
                                 if (node.interfaces) networkString += JSON.stringify(node.interfaces).toLowerCase();
@@ -280,8 +292,12 @@ module.exports.deepsearch = function (parent) {
                                 if (node.conn) networkString += JSON.stringify(node.conn).toLowerCase();
                                 if (node.ip) networkString += String(node.ip).toLowerCase();
 
-                                if (networkString.indexOf(query) !== -1) {
-                                    match = true; matchReason = 'Network Match (IP / MAC)';
+                                // Normalize the network string to strip special chars for reliable MAC searching
+                                var normalizedNetworkString = networkString.replace(/[:\-.]/g, '');
+
+                                // Check raw query OR normalized query (if the query is at least 4 chars long to prevent false positives)
+                                if (networkString.indexOf(rawQuery) !== -1 || (normalizedQuery.length >= 4 && normalizedNetworkString.indexOf(normalizedQuery) !== -1)) {
+                                    match = true; matchReason = 'Network Interface (Local IP / MAC)';
                                 }
                             }
 
