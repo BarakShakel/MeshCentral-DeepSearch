@@ -25,7 +25,7 @@ module.exports.deepsearch = function (parent) {
     obj.injectSearchBar = function () {
         if (document.getElementById('deepsearch-bar')) return;
 
-        var existingFilter = document.getElementById('ft');
+        var existingFilter = document.getElementById('SearchInput');
         if (!existingFilter) return;
 
         var bar = document.createElement('div');
