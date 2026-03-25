@@ -40,7 +40,6 @@ module.exports.deepsearch = function (parent) {
 
     // Injects a "Deep Search" button next to the native MeshCentral search bar
     obj.injectDeepSearchButton = function () {
-        // Prevent duplicate injections
         if (document.getElementById('btn-deep-search')) return;
 
         var existingFilter = document.getElementById('SearchInput');
@@ -59,7 +58,6 @@ module.exports.deepsearch = function (parent) {
             pluginHandler.deepsearch.showDeepSearchDialog();
         };
 
-        // Insert the button directly after the native search input
         existingFilter.parentNode.insertBefore(btn, existingFilter.nextSibling);
     };
 
@@ -67,18 +65,22 @@ module.exports.deepsearch = function (parent) {
     obj.showDeepSearchDialog = function () {
         if (document.getElementById('deepSearchOverlay')) return;
 
+        // FIX FOCUS STEALING: Disable native search input while our modal is open
+        var nativeSearch = document.getElementById('SearchInput');
+        if (nativeSearch) {
+            nativeSearch.disabled = true;
+        }
+
         // Create overlay background
         var overlay = document.createElement('div');
         overlay.id = 'deepSearchOverlay';
         overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center;';
         
-        // Detect Dark Mode for adaptive styling
         var isDark = document.body.classList.contains('dark-mode'); 
         var bgColor = isDark ? '#222' : '#fff';
         var textColor = isDark ? '#eee' : '#333';
         var borderColor = isDark ? '#444' : '#ddd';
 
-        // Create Modal Window
         var modal = document.createElement('div');
         modal.style.cssText = 'background:' + bgColor + '; color:' + textColor + '; width:550px; max-width:90%; border-radius:8px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.5); display:flex; flex-direction:column; max-height:80vh;';
 
@@ -87,8 +89,9 @@ module.exports.deepsearch = function (parent) {
                      '<span style="cursor:pointer; font-size:24px; font-weight:bold; line-height:1;" onclick="pluginHandler.deepsearch.closeDeepSearch()">&times;</span>' +
                      '</div>';
 
+        // FIX FOCUS STEALING: Added event.stopPropagation() to prevent native UI from handling keystrokes
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
-                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeydown="if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
+                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
                         '<button onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
                         '</div>';
 
@@ -100,13 +103,23 @@ module.exports.deepsearch = function (parent) {
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
 
-        // Auto-focus the input field
-        setTimeout(function() { document.getElementById('deepSearchInput').focus(); }, 100);
+        // Force focus to our new input field
+        setTimeout(function() { 
+            var inputEl = document.getElementById('deepSearchInput');
+            if(inputEl) inputEl.focus(); 
+        }, 100);
     };
 
     obj.closeDeepSearch = function () {
         var overlay = document.getElementById('deepSearchOverlay');
         if (overlay) document.body.removeChild(overlay);
+
+        // FIX FOCUS STEALING: Re-enable native search input
+        var nativeSearch = document.getElementById('SearchInput');
+        if (nativeSearch) {
+            nativeSearch.disabled = false;
+            nativeSearch.focus();
+        }
     };
 
     obj.performDeepSearch = function () {
@@ -166,7 +179,7 @@ module.exports.deepsearch = function (parent) {
         resultsDiv.innerHTML = html;
     };
 
-    // Helper function to safely escape special characters in user input/output
+    // Helper function to safely escape special characters
     obj.esc = function (s) {
         if (s == null) return '';
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -182,22 +195,35 @@ module.exports.deepsearch = function (parent) {
         if (command.pluginaction === 'doSearch') {
             var query = (command.query || '').toLowerCase().trim();
             
-            // Helper function to transmit results directly back to the requesting admin
+            // Extract the user's secure websocket session ID
+            var sessionid = null;
+            try { sessionid = myparent.ws.sessionId; } catch (e) {}
+            
+            // Bulletproof routing function exactly as used in HW Health
             var replyToClient = function(dataArray, isError, errorMsg) {
+                var responsePayload = JSON.stringify({
+                    action: 'plugin',
+                    plugin: 'deepsearch',
+                    method: 'loadSearchResults',
+                    data: dataArray || [],
+                    error: !!isError,
+                    errorMessage: errorMsg || ''
+                });
+
+                // Primary routing attempt via wssessions2 (MeshCentral standard)
+                if (sessionid && obj.meshServer && obj.meshServer.webserver && obj.meshServer.webserver.wssessions2 && obj.meshServer.webserver.wssessions2[sessionid]) {
+                    try {
+                        obj.meshServer.webserver.wssessions2[sessionid].send(responsePayload);
+                        return;
+                    } catch (e) {}
+                }
+                
+                // Fallback routing attempt directly via parent object
                 try {
                     if (myparent && typeof myparent.send === 'function') {
-                        myparent.send(JSON.stringify({
-                            action: 'plugin',
-                            plugin: 'deepsearch',
-                            method: 'loadSearchResults',
-                            data: dataArray || [],
-                            error: !!isError,
-                            errorMessage: errorMsg || ''
-                        }));
+                        myparent.send(responsePayload);
                     }
-                } catch (e) {
-                    console.log('Deep Search reply error:', e);
-                }
+                } catch (e) {}
             };
 
             if (!query) {
@@ -206,7 +232,7 @@ module.exports.deepsearch = function (parent) {
             }
 
             try {
-                // Fetch all nodes directly from the MeshCentral MongoDB/NeDB datastore
+                // Execute DB query
                 if (obj.meshServer && obj.meshServer.db && typeof obj.meshServer.db.GetAllType === 'function') {
                     obj.meshServer.db.GetAllType('node', function (err, allNodes) {
                         
@@ -216,13 +242,12 @@ module.exports.deepsearch = function (parent) {
                         }
 
                         var results = [];
-                        // Check if the requesting user has full site administrator privileges
                         var isSiteAdmin = (myparent.user && myparent.user.siteadmin == 0xFFFFFFFF);
 
                         for (var i = 0; i < allNodes.length; i++) {
                             var node = allNodes[i];
                             
-                            // Security Gate: Only search nodes the current user is permitted to see
+                            // Security Gate
                             if (!isSiteAdmin) {
                                 if (!myparent.user || !myparent.user.links || !myparent.user.links[node.meshid]) continue;
                             }
@@ -277,10 +302,9 @@ module.exports.deepsearch = function (parent) {
                         replyToClient(results, false, "");
                     });
                 } else {
-                    replyToClient([], true, "Database function GetAllType not found. Plugin may need an update.");
+                    replyToClient([], true, "Database API not accessible.");
                 }
             } catch (ex) {
-                console.log('Deep Search Plugin Error:', ex);
                 replyToClient([], true, "Server exception: " + ex.message);
             }
         }
