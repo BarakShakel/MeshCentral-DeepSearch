@@ -5,14 +5,12 @@ module.exports.deepsearch = function (parent) {
     obj.parent = parent;
     obj.meshServer = parent.parent;
 
-    // Functions exposed to the frontend browser
-    obj.exports = ['onWebUIStartupEnd', 'goPageEnd'];
+    // All functions that need to run in the browser must be listed here
+    obj.exports = ['onWebUIStartupEnd', 'goPageEnd', 'injectSearchBar', 'applyFilter', 'clearFilter'];
 
     obj.server_startup = function () {
         console.log('DeepSearch plugin loaded on server.');
     };
-
-    // ── Client-Side Code (runs in the browser) ─────────────────────────────
 
     obj.onWebUIStartupEnd = function () {
         pluginHandler.deepsearch.injectSearchBar();
@@ -35,9 +33,9 @@ module.exports.deepsearch = function (parent) {
         bar.style.cssText = 'margin: 4px 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;';
         bar.innerHTML = [
             '<span style="font-size:12px;font-weight:bold;">&#x1F50D; DeepSearch:</span>',
-            '<input id="ds-ip"   type="text" placeholder="Filter by IP..."         style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
-            '<input id="ds-user" type="text" placeholder="Filter by Username..."   style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
-            '<input id="ds-desc" type="text" placeholder="Filter by Description..." style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
+            '<input id="ds-ip"   type="text" placeholder="Filter by IP..."          style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
+            '<input id="ds-user" type="text" placeholder="Filter by Username..."    style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
+            '<input id="ds-desc" type="text" placeholder="Filter by Description..."  style="padding:2px 6px;font-size:12px;border:1px solid #ccc;border-radius:3px;" />',
             '<button id="ds-clear" style="padding:2px 8px;font-size:12px;cursor:pointer;">Clear</button>'
         ].join('');
 
