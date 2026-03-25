@@ -89,7 +89,7 @@ module.exports.deepsearch = function (parent) {
                      '</div>';
 
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
-                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
+                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC (e.g. 00:11:22...), or Desc..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
                         '<button type="button" onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
                         '</div>';
 
@@ -163,13 +163,16 @@ module.exports.deepsearch = function (parent) {
             var itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
             var itemBorder = isDark ? '#444' : '#eee';
 
-            // FIX URL NAVIGATION: Utilizing MeshCentral's native parameters to directly open the node view.
+            // FIX URL NAVIGATION: The _id in the DB looks like 'node//domain//INWkF7yO...'. 
+            // MeshCentral's UI expects ONLY the last part. We use split('//').pop() to extract the clean ID.
+            var pureNodeId = String(device._id).split('//').pop();
+
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
                     '<div style="font-size:12px; opacity:0.8; margin-top:4px;">Match: ' + pluginHandler.deepsearch.esc(device.reason) + '</div>' +
                     '</div>' +
-                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.search=\'?viewmode=10&gotonode=\' + encodeURIComponent(\'' + device._id + '\');" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
+                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.href=\'?viewmode=10&gotonode=\' + encodeURIComponent(\'' + pureNodeId + '\');" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
                     '</div>';
         }
 
@@ -189,10 +192,8 @@ module.exports.deepsearch = function (parent) {
         if (command.plugin !== 'deepsearch') return;
 
         if (command.pluginaction === 'doSearch') {
+            // Keep the raw query exactly as the user typed it (with colons if they used them)
             var rawQuery = (command.query || '').trim().toLowerCase();
-            
-            // Normalize the query strictly for MAC/IP matching (removes separators)
-            var normalizedQuery = rawQuery.replace(/[:\-.]/g, '');
             
             var sessionid = null;
             try { sessionid = myparent.ws.sessionId; } catch (e) {}
@@ -254,12 +255,12 @@ module.exports.deepsearch = function (parent) {
                             }
 
                             // 2. Search by Device Description
-                            if (!match && node.desc && node.desc.toLowerCase().indexOf(rawQuery) !== -1) {
+                            else if (node.desc && node.desc.toLowerCase().indexOf(rawQuery) !== -1) {
                                 match = true; matchReason = 'Description';
                             }
                             
                             // 3. Search by Logged-in Users
-                            if (!match && node.users) {
+                            else if (node.users) {
                                 for (var u = 0; u < node.users.length; u++) {
                                     if (node.users[u] && node.users[u].toLowerCase().indexOf(rawQuery) !== -1) {
                                         match = true; matchReason = 'Logged-in User (' + node.users[u] + ')';
@@ -269,50 +270,40 @@ module.exports.deepsearch = function (parent) {
                             }
 
                             // 4. Search by Connection Public IP
-                            if (!match && node.conn && node.conn.ip) {
-                                if (node.conn.ip.toLowerCase().indexOf(rawQuery) !== -1) {
-                                    match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
-                                }
+                            else if (node.conn && node.conn.ip && node.conn.ip.toLowerCase().indexOf(rawQuery) !== -1) {
+                                match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
                             }
 
-                            // 5. Targeted Search for MAC Addresses and Local IPs
-                            // We only stringify specific network objects to avoid false positives from node hashes
+                            // 5. Explicitly search Network Interfaces (MAC and IP)
                             if (!match) {
-                                var isMacFound = false;
-                                var isIpFound = false;
-
-                                // 5A. Check node.macs array directly
-                                if (node.macs && Array.isArray(node.macs)) {
+                                // A. Search inside general netinfo (IPs usually sit here)
+                                if (node.netinfo) {
+                                    var netStr = JSON.stringify(node.netinfo).toLowerCase();
+                                    if (netStr.indexOf(rawQuery) !== -1) {
+                                        match = true; matchReason = 'Network Match (IP / MAC)';
+                                    }
+                                }
+                                
+                                // B. Strict and Smart MAC Search
+                                // Ensures that even if the DB stored the MAC without colons, we format it with colons for the check
+                                if (!match && node.macs && Array.isArray(node.macs)) {
                                     for (var m = 0; m < node.macs.length; m++) {
-                                        var normMac = node.macs[m].replace(/[:\-.]/g, '').toLowerCase();
-                                        if (normMac.indexOf(normalizedQuery) !== -1) {
-                                            isMacFound = true;
-                                            matchReason = 'MAC Address (' + node.macs[m] + ')';
+                                        var macVal = node.macs[m].toLowerCase();
+                                        
+                                        // If the database MAC is 12 chars without colons, inject colons to match user's expected format
+                                        if (macVal.length === 12 && macVal.indexOf(':') === -1) {
+                                            var formattedMac = macVal.match(/.{1,2}/g).join(':');
+                                            if (formattedMac.indexOf(rawQuery) !== -1) {
+                                                match = true; matchReason = 'MAC Address (' + formattedMac.toUpperCase() + ')';
+                                                break;
+                                            }
+                                        } 
+                                        // Otherwise check it directly
+                                        else if (macVal.indexOf(rawQuery) !== -1) {
+                                            match = true; matchReason = 'MAC Address (' + macVal.toUpperCase() + ')';
                                             break;
                                         }
                                     }
-                                }
-
-                                // 5B. Check inside netinfo object
-                                if (!isMacFound && node.netinfo) {
-                                    var netStr = JSON.stringify(node.netinfo).toLowerCase();
-                                    
-                                    // Raw match for IPs
-                                    if (netStr.indexOf(rawQuery) !== -1) {
-                                        isIpFound = true;
-                                        matchReason = 'Network Interface (IP)';
-                                    } else if (normalizedQuery.length >= 4) {
-                                        // Normalized match for MACs inside netinfo
-                                        var normNetStr = netStr.replace(/[:\-.]/g, '');
-                                        if (normNetStr.indexOf(normalizedQuery) !== -1) {
-                                            isMacFound = true;
-                                            matchReason = 'Network Interface (MAC)';
-                                        }
-                                    }
-                                }
-
-                                if (isMacFound || isIpFound) {
-                                    match = true;
                                 }
                             }
 
