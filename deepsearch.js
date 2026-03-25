@@ -65,9 +65,11 @@ module.exports.deepsearch = function (parent) {
     obj.showDeepSearchDialog = function () {
         if (document.getElementById('deepSearchOverlay')) return;
 
-        // FIX FOCUS STEALING: Disable native search input while our modal is open
+        // FIX FOCUS STEALING: Temporarily rename the native search input ID 
+        // so MeshCentral's global keydown interceptor cannot find it and steal focus.
         var nativeSearch = document.getElementById('SearchInput');
         if (nativeSearch) {
+            nativeSearch.id = 'SearchInput_TempDisabled';
             nativeSearch.disabled = true;
         }
 
@@ -89,9 +91,9 @@ module.exports.deepsearch = function (parent) {
                      '<span style="cursor:pointer; font-size:24px; font-weight:bold; line-height:1;" onclick="pluginHandler.deepsearch.closeDeepSearch()">&times;</span>' +
                      '</div>';
 
-        // FIX FOCUS STEALING: Added event.stopPropagation() to prevent native UI from handling keystrokes
+        // Added stopPropagation to key events to prevent MeshCentral from intercepting typing
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
-                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
+                        '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
                         '<button onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
                         '</div>';
 
@@ -114,11 +116,11 @@ module.exports.deepsearch = function (parent) {
         var overlay = document.getElementById('deepSearchOverlay');
         if (overlay) document.body.removeChild(overlay);
 
-        // FIX FOCUS STEALING: Re-enable native search input
-        var nativeSearch = document.getElementById('SearchInput');
+        // FIX FOCUS STEALING: Restore native search input ID and enable it
+        var nativeSearch = document.getElementById('SearchInput_TempDisabled');
         if (nativeSearch) {
+            nativeSearch.id = 'SearchInput';
             nativeSearch.disabled = false;
-            nativeSearch.focus();
         }
     };
 
@@ -167,12 +169,13 @@ module.exports.deepsearch = function (parent) {
             var itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
             var itemBorder = isDark ? '#444' : '#eee';
 
+            // FIX URL ENCODING: encodeURIComponent ensures the complex device._id does not break the URL
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
                     '<div style="font-size:12px; opacity:0.8; margin-top:4px;">Match: ' + pluginHandler.deepsearch.esc(device.reason) + '</div>' +
                     '</div>' +
-                    '<button onclick="window.location.href=\'?id=' + device._id + '\'; pluginHandler.deepsearch.closeDeepSearch();" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
+                    '<button onclick="window.location.href=\'/?id=' + encodeURIComponent(device._id) + '\'; pluginHandler.deepsearch.closeDeepSearch();" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
                     '</div>';
         }
 
@@ -195,11 +198,9 @@ module.exports.deepsearch = function (parent) {
         if (command.pluginaction === 'doSearch') {
             var query = (command.query || '').toLowerCase().trim();
             
-            // Extract the user's secure websocket session ID
             var sessionid = null;
             try { sessionid = myparent.ws.sessionId; } catch (e) {}
             
-            // Bulletproof routing function exactly as used in HW Health
             var replyToClient = function(dataArray, isError, errorMsg) {
                 var responsePayload = JSON.stringify({
                     action: 'plugin',
@@ -210,7 +211,6 @@ module.exports.deepsearch = function (parent) {
                     errorMessage: errorMsg || ''
                 });
 
-                // Primary routing attempt via wssessions2 (MeshCentral standard)
                 if (sessionid && obj.meshServer && obj.meshServer.webserver && obj.meshServer.webserver.wssessions2 && obj.meshServer.webserver.wssessions2[sessionid]) {
                     try {
                         obj.meshServer.webserver.wssessions2[sessionid].send(responsePayload);
@@ -218,7 +218,6 @@ module.exports.deepsearch = function (parent) {
                     } catch (e) {}
                 }
                 
-                // Fallback routing attempt directly via parent object
                 try {
                     if (myparent && typeof myparent.send === 'function') {
                         myparent.send(responsePayload);
@@ -232,7 +231,6 @@ module.exports.deepsearch = function (parent) {
             }
 
             try {
-                // Execute DB query
                 if (obj.meshServer && obj.meshServer.db && typeof obj.meshServer.db.GetAllType === 'function') {
                     obj.meshServer.db.GetAllType('node', function (err, allNodes) {
                         
@@ -247,7 +245,6 @@ module.exports.deepsearch = function (parent) {
                         for (var i = 0; i < allNodes.length; i++) {
                             var node = allNodes[i];
                             
-                            // Security Gate
                             if (!isSiteAdmin) {
                                 if (!myparent.user || !myparent.user.links || !myparent.user.links[node.meshid]) continue;
                             }
@@ -275,18 +272,16 @@ module.exports.deepsearch = function (parent) {
                                 }
                             }
 
-                            // 4. Search by Connection Public IP
-                            if (!match && node.conn && node.conn.ip) {
-                                if (node.conn.ip.toLowerCase().indexOf(query) !== -1) {
-                                    match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
-                                }
-                            }
+                            // 4. Search by ALL Network Interfaces (Local IPs, Public IPs, MACs)
+                            if (!match) {
+                                var networkString = '';
+                                if (node.interfaces) networkString += JSON.stringify(node.interfaces).toLowerCase();
+                                if (node.netinfo) networkString += JSON.stringify(node.netinfo).toLowerCase();
+                                if (node.conn) networkString += JSON.stringify(node.conn).toLowerCase();
+                                if (node.ip) networkString += String(node.ip).toLowerCase();
 
-                            // 5. Search by Local IPs / MAC Addresses (Deep Search within netinfo object)
-                            if (!match && node.netinfo) {
-                                var netStr = JSON.stringify(node.netinfo).toLowerCase();
-                                if (netStr.indexOf(query) !== -1) {
-                                    match = true; matchReason = 'Network Interface (Local IP / MAC)';
+                                if (networkString.indexOf(query) !== -1) {
+                                    match = true; matchReason = 'Network Match (IP / MAC)';
                                 }
                             }
 
