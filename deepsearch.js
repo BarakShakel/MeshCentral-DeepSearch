@@ -88,7 +88,6 @@ module.exports.deepsearch = function (parent) {
                      '<span style="cursor:pointer; font-size:24px; font-weight:bold; line-height:1;" onclick="pluginHandler.deepsearch.closeDeepSearch()">&times;</span>' +
                      '</div>';
 
-        // Updated placeholder to reflect we are searching for Name, IP, User, Desc
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
                         '<input type="text" id="deepSearchInput" placeholder="Enter Name, IP, Username, or Desc..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
                         '<button type="button" onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
@@ -167,8 +166,7 @@ module.exports.deepsearch = function (parent) {
             // Extract the raw ID without the domain prefix
             var pureNodeId = String(device._id).split('//').pop();
 
-            // FIX URL NAVIGATION: Removed encodeURIComponent so characters like '@' and '$' remain intact.
-            // Using window.location.pathname ensures it works whether you are on '/' or '/login'.
+            // Native navigation
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
@@ -244,6 +242,7 @@ module.exports.deepsearch = function (parent) {
                         for (var i = 0; i < allNodes.length; i++) {
                             var node = allNodes[i];
                             
+                            // Security Gate
                             if (!isSiteAdmin) {
                                 if (!myparent.user || !myparent.user.links || !myparent.user.links[node.meshid]) continue;
                             }
@@ -271,16 +270,18 @@ module.exports.deepsearch = function (parent) {
                                 }
                             }
 
-                            // 4. Search by Connection Public IP
-                            else if (node.conn && node.conn.ip && node.conn.ip.toLowerCase().indexOf(rawQuery) !== -1) {
-                                match = true; matchReason = 'Public IP (' + node.conn.ip + ')';
-                            }
+                            // 4. Broad Search by All IP and Network Interfaces
+                            if (!match) {
+                                var netData = "";
+                                // Collect all possible locations where MeshCentral stores IP addresses
+                                if (node.conn && node.conn.ip) netData += String(node.conn.ip).toLowerCase() + " ";
+                                if (node.ip) netData += String(node.ip).toLowerCase() + " ";
+                                if (node.netinfo) netData += JSON.stringify(node.netinfo).toLowerCase() + " ";
+                                if (node.interfaces) netData += JSON.stringify(node.interfaces).toLowerCase();
 
-                            // 5. Search by Local IPs (netinfo)
-                            else if (node.netinfo) {
-                                var netStr = JSON.stringify(node.netinfo).toLowerCase();
-                                if (netStr.indexOf(rawQuery) !== -1) {
-                                    match = true; matchReason = 'Network Interface (IP)';
+                                if (netData.indexOf(rawQuery) !== -1) {
+                                    match = true; 
+                                    matchReason = 'Network Interface (IP)';
                                 }
                             }
 
