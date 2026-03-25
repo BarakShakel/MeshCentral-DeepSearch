@@ -30,9 +30,8 @@ module.exports.deepsearch = function (parent) {
         pluginHandler.deepsearch.injectDeepSearchButton();
     };
 
-    // Triggered whenever the user navigates between main tabs in MeshCentral
+    // Triggered whenever the user navigates between main tabs
     obj.goPageEnd = function (page, event) {
-        // Page 1 is the main "Devices" list view
         if (page === 1) {
             pluginHandler.deepsearch.injectDeepSearchButton();
         }
@@ -49,7 +48,6 @@ module.exports.deepsearch = function (parent) {
         btn.id = 'btn-deep-search';
         btn.type = 'button';
         btn.innerHTML = '&#128269; Deep Search';
-        // Styling matches MeshCentral's native look, supporting Light/Dark mode seamlessly
         btn.style.cssText = 'margin-left: 10px; padding: 4px 12px; border-radius: 3px; background-color: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; font-size: 13px; height: 28px; vertical-align: middle;';
         
         btn.onmouseover = function() { this.style.backgroundColor = '#0056b3'; };
@@ -62,18 +60,17 @@ module.exports.deepsearch = function (parent) {
         existingFilter.parentNode.insertBefore(btn, existingFilter.nextSibling);
     };
 
-    // Opens the modal dialogue to perform the server-side deep search
+    // Opens the modal dialogue
     obj.showDeepSearchDialog = function () {
         if (document.getElementById('deepSearchOverlay')) return;
 
-        // Prevent native UI from stealing focus by temporarily disabling it
+        // Prevent native UI from stealing focus
         var nativeSearch = document.getElementById('SearchInput');
         if (nativeSearch) {
             nativeSearch.id = 'SearchInput_TempDisabled';
             nativeSearch.disabled = true;
         }
 
-        // Create overlay background
         var overlay = document.createElement('div');
         overlay.id = 'deepSearchOverlay';
         overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center;';
@@ -91,7 +88,6 @@ module.exports.deepsearch = function (parent) {
                      '<span style="cursor:pointer; font-size:24px; font-weight:bold; line-height:1;" onclick="pluginHandler.deepsearch.closeDeepSearch()">&times;</span>' +
                      '</div>';
 
-        // Added stopPropagation to prevent MeshCentral from intercepting typing
         var inputArea = '<div style="display:flex; gap:10px; margin-bottom:15px;">' +
                         '<input type="text" id="deepSearchInput" placeholder="Enter IP, Username, MAC, or Description..." style="flex:1; padding:10px; border:1px solid ' + borderColor + '; border-radius:4px; background:transparent; color:' + textColor + ';" onkeypress="event.stopPropagation();" onkeyup="event.stopPropagation();" onkeydown="event.stopPropagation(); if(event.key === \'Enter\') pluginHandler.deepsearch.performDeepSearch()">' +
                         '<button type="button" onclick="pluginHandler.deepsearch.performDeepSearch()" style="background:#007bff; color:white; border:none; padding:10px 20px; border-radius:4px; cursor:pointer; font-weight:bold;">Search</button>' +
@@ -105,7 +101,6 @@ module.exports.deepsearch = function (parent) {
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
 
-        // Force focus to our new input field
         setTimeout(function() { 
             var inputEl = document.getElementById('deepSearchInput');
             if(inputEl) inputEl.focus(); 
@@ -116,7 +111,6 @@ module.exports.deepsearch = function (parent) {
         var overlay = document.getElementById('deepSearchOverlay');
         if (overlay) document.body.removeChild(overlay);
 
-        // Restore native search input ID and enable it
         var nativeSearch = document.getElementById('SearchInput_TempDisabled');
         if (nativeSearch) {
             nativeSearch.id = 'SearchInput';
@@ -169,21 +163,19 @@ module.exports.deepsearch = function (parent) {
             var itemBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
             var itemBorder = isDark ? '#444' : '#eee';
 
-            // FIX URL NAVIGATION: Changed to Hash Routing ('#?id=') to utilize MeshCentral's Single Page Application architecture.
-            // This prevents hard reloads and navigates instantly. No URL encoding needed for MeshCentral IDs.
+            // FIX URL NAVIGATION: Utilizing MeshCentral's native parameters to directly open the node view.
             html += '<div style="padding:12px; margin-bottom:10px; border:1px solid ' + itemBorder + '; border-radius:5px; background:' + itemBg + '; display:flex; justify-content:space-between; align-items:center;">' +
                     '<div>' +
                     '<div style="font-weight:bold; font-size:15px; color:#007bff;">' + pluginHandler.deepsearch.esc(device.name) + '</div>' +
                     '<div style="font-size:12px; opacity:0.8; margin-top:4px;">Match: ' + pluginHandler.deepsearch.esc(device.reason) + '</div>' +
                     '</div>' +
-                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.href=\'#?id=' + device._id + '\';" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
+                    '<button type="button" onclick="pluginHandler.deepsearch.closeDeepSearch(); window.location.search=\'?viewmode=10&gotonode=\' + encodeURIComponent(\'' + device._id + '\');" style="background:#28a745; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Go to Device</button>' +
                     '</div>';
         }
 
         resultsDiv.innerHTML = html;
     };
 
-    // Helper function to safely escape special characters
     obj.esc = function (s) {
         if (s == null) return '';
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -199,7 +191,7 @@ module.exports.deepsearch = function (parent) {
         if (command.pluginaction === 'doSearch') {
             var rawQuery = (command.query || '').trim().toLowerCase();
             
-            // Normalize the query by removing colons, dashes, and dots (crucial for MAC addresses)
+            // Normalize the query strictly for MAC/IP matching (removes separators)
             var normalizedQuery = rawQuery.replace(/[:\-.]/g, '');
             
             var sessionid = null;
@@ -283,15 +275,44 @@ module.exports.deepsearch = function (parent) {
                                 }
                             }
 
-                            // 5. Deep Search across the ENTIRE node object for MACs and hidden IPs
-                            // Stringifying the whole node ensures no MAC address is missed regardless of where MeshCentral stores it.
+                            // 5. Targeted Search for MAC Addresses and Local IPs
+                            // We only stringify specific network objects to avoid false positives from node hashes
                             if (!match) {
-                                var fullNodeString = JSON.stringify(node).toLowerCase();
-                                var normalizedNodeString = fullNodeString.replace(/[:\-.]/g, '');
+                                var isMacFound = false;
+                                var isIpFound = false;
 
-                                // Check raw query OR normalized query (require at least 4 chars to prevent false positives)
-                                if (fullNodeString.indexOf(rawQuery) !== -1 || (normalizedQuery.length >= 4 && normalizedNodeString.indexOf(normalizedQuery) !== -1)) {
-                                    match = true; matchReason = 'Deep Hardware/Network Match (IP / MAC)';
+                                // 5A. Check node.macs array directly
+                                if (node.macs && Array.isArray(node.macs)) {
+                                    for (var m = 0; m < node.macs.length; m++) {
+                                        var normMac = node.macs[m].replace(/[:\-.]/g, '').toLowerCase();
+                                        if (normMac.indexOf(normalizedQuery) !== -1) {
+                                            isMacFound = true;
+                                            matchReason = 'MAC Address (' + node.macs[m] + ')';
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // 5B. Check inside netinfo object
+                                if (!isMacFound && node.netinfo) {
+                                    var netStr = JSON.stringify(node.netinfo).toLowerCase();
+                                    
+                                    // Raw match for IPs
+                                    if (netStr.indexOf(rawQuery) !== -1) {
+                                        isIpFound = true;
+                                        matchReason = 'Network Interface (IP)';
+                                    } else if (normalizedQuery.length >= 4) {
+                                        // Normalized match for MACs inside netinfo
+                                        var normNetStr = netStr.replace(/[:\-.]/g, '');
+                                        if (normNetStr.indexOf(normalizedQuery) !== -1) {
+                                            isMacFound = true;
+                                            matchReason = 'Network Interface (MAC)';
+                                        }
+                                    }
+                                }
+
+                                if (isMacFound || isIpFound) {
+                                    match = true;
                                 }
                             }
 
